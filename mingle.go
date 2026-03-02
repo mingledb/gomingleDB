@@ -107,6 +107,54 @@ func (db *MingleDB) DefineSchema(collection string, schema SchemaDefinition) {
 	db.schemas[collection] = schema
 }
 
+// ListCollections returns the names of all collections (existing .mgdb files and any with schema defined).
+func (db *MingleDB) ListCollections() ([]string, error) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	entries, err := os.ReadDir(db.dbDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			names := make([]string, 0, len(db.schemas))
+			for name := range db.schemas {
+				names = append(names, name)
+			}
+			return names, nil
+		}
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if filepath.Ext(e.Name()) == extension {
+			name := e.Name()[:len(e.Name())-len(extension)]
+			seen[name] = struct{}{}
+		}
+	}
+	for name := range db.schemas {
+		seen[name] = struct{}{}
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+// DBDir returns the current database directory path.
+func (db *MingleDB) DBDir() string {
+	return db.dbDir
+}
+
+// GetSchema returns the schema for a collection if defined, and whether it exists.
+func (db *MingleDB) GetSchema(collection string) (SchemaDefinition, bool) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	s, ok := db.schemas[collection]
+	return s, ok
+}
+
 func (db *MingleDB) getFilePath(collection string) string {
 	return filepath.Join(db.dbDir, collection+extension)
 }
