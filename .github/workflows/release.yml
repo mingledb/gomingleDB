@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from tag
+        id: tag
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create source archive
+        run: |
+          mkdir -p release
+          zip -r release/gomingleDB-${{ steps.tag.outputs.VERSION }}.zip . -x ".git/*" -x ".github/*"
+          echo "Created release/gomingleDB-${{ steps.tag.outputs.VERSION }}.zip"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.VERSION }}
+          name: Release ${{ steps.tag.outputs.VERSION }}
+          files: release/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

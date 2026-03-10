@@ -364,7 +364,7 @@ func (db *MingleDB) validateSchemaLocked(collection string, doc map[string]inter
 			}
 			if rule.Unique {
 				for _, d := range all {
-					if d[key] == val {
+					if valueEqual(d[key], val) {
 						return fmt.Errorf("%w: duplicate value for unique field %q", ErrValidation, key)
 					}
 				}
