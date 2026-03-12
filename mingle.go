@@ -58,7 +58,7 @@ type SchemaDefinition map[string]SchemaRule
 // The directory is created if it does not exist.
 func New(dbDir string) *MingleDB {
 	if dbDir == "" {
-		dbDir = "./mydb"
+		dbDir = ".mgdb"
 	}
 	_ = os.MkdirAll(dbDir, 0755)
 	return &MingleDB{
