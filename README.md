@@ -15,7 +15,7 @@ Go port of [MingleDB](https://github.com/mingledb/mingledb): a lightweight, file
 ## Installation
 
 ```bash
-go get gomingleDB
+go get github.com/mingledb/gomingleDB
 ```
 
 ## Usage
@@ -23,7 +23,7 @@ go get gomingleDB
 ```go
 package main
 
-import "gomingleDB"
+import "github.com/mingledb/gomingleDB"
 
 func main() {
     db := gomingleDB.New("./data") // optional: default is "./mydb"

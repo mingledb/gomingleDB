@@ -1,4 +1,4 @@
-module gomingleDB
+module github.com/mingledb/gomingleDB
 
 go 1.21
 

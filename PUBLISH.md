@@ -6,8 +6,8 @@ gomingleDB is a Go module. You can “publish” it by pushing to GitHub and (op
 
 - **mingledb-cli** (and other local projects) can depend on gomingleDB with a `replace` in `go.mod`:
   ```go
-  replace gomingleDB => ../gomingleDB
-  require gomingleDB v0.0.0
+  replace github.com/mingledb/gomingleDB => ../gomingleDB
+  require github.com/mingledb/gomingleDB v0.0.0
   ```
 - No need to change gomingleDB. For **mingledb-cli** CI, the release workflow checks out this repo next to mingledb-cli so the replace path exists.
 
