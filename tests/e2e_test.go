@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"gomingleDB"
+	"github.com/mingledb/gomingleDB"
 )
 
 func tmpDir(t *testing.T) string {
