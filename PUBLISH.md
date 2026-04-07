@@ -45,4 +45,4 @@ gomingleDB is a Go module. You can “publish” it by pushing to GitHub and (op
 | Goal                         | Action |
 |-----------------------------|--------|
 | Release mingledb-cli binaries | Tag `v*` in mingledb-cli; ensure gomingleDB repo exists under same owner. See mingledb-cli’s **PUBLISH.md**. |
-| Let others use gomingleDB    | Change module path in gomingleDB to `github.com/owner/gomingleDB`, push, tag (e.g. `v0.0.1`). |
+| Let others use gomingleDB    | Use module path `github.com/mingledb/gomingleDB`, push, and tag a version (e.g. `v0.0.1`). |
