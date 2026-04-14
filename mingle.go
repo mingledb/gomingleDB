@@ -16,30 +16,32 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 
 	"go.mongodb.org/mongo-driver/bson"
 )
 
 const (
-	header        = "MINGLEDBv1"
-	extension     = ".mgdb"
+	header         = "MINGLEDBv1"
+	extension      = ".mgdb"
+	defaultDBFile  = "database.mgdb"
 	authCollection = "_auth"
 )
 
 var (
-	ErrUsernameExists   = errors.New("username already exists")
-	ErrAuthFailed       = errors.New("authentication failed")
-	ErrValidation       = errors.New("validation error")
-	ErrRequired         = errors.New("field is required")
-	ErrTypeMismatch     = errors.New("field type mismatch")
-	ErrUniqueViolation  = errors.New("duplicate value for unique field")
+	ErrUsernameExists  = errors.New("username already exists")
+	ErrAuthFailed      = errors.New("authentication failed")
+	ErrValidation      = errors.New("validation error")
+	ErrRequired        = errors.New("field is required")
+	ErrTypeMismatch    = errors.New("field type mismatch")
+	ErrUniqueViolation = errors.New("duplicate value for unique field")
 )
 
 // MingleDB is the main database handle.
 type MingleDB struct {
 	mu       sync.RWMutex
-	dbDir    string
+	dbPath   string
 	schemas  map[string]SchemaDefinition
 	sessions map[string]struct{} // authenticated usernames
 }
@@ -54,43 +56,34 @@ type SchemaRule struct {
 // SchemaDefinition is a map of field name -> rule.
 type SchemaDefinition map[string]SchemaRule
 
-// New creates a MingleDB instance. dbDir defaults to "./mydb" if empty.
-// The directory is created if it does not exist.
-func New(dbDir string) *MingleDB {
-	if dbDir == "" {
-		dbDir = ".mgdb"
-	}
-	_ = os.MkdirAll(dbDir, 0755)
+// New creates a MingleDB instance backed by a single .mgdb file.
+// If dbPath is a directory, "database.mgdb" is created inside it.
+func New(dbPath string) *MingleDB {
+	resolved := resolveDBPath(dbPath)
+	_ = os.MkdirAll(filepath.Dir(resolved), 0755)
 	return &MingleDB{
-		dbDir:    dbDir,
+		dbPath:   resolved,
 		schemas:  make(map[string]SchemaDefinition),
 		sessions: make(map[string]struct{}),
 	}
 }
 
-// Reset wipes all collection files and clears schemas and auth state.
+func resolveDBPath(dbPath string) string {
+	if strings.TrimSpace(dbPath) == "" {
+		return defaultDBFile
+	}
+	if strings.HasSuffix(strings.ToLower(dbPath), extension) {
+		return dbPath
+	}
+	return filepath.Join(dbPath, defaultDBFile)
+}
+
+// Reset wipes the database file and clears schemas and auth state.
 func (db *MingleDB) Reset() error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
-
-	entries, err := os.ReadDir(db.dbDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			db.schemas = make(map[string]SchemaDefinition)
-			db.sessions = make(map[string]struct{})
-			return nil
-		}
+	if err := os.Remove(db.dbPath); err != nil && !os.IsNotExist(err) {
 		return err
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		if filepath.Ext(e.Name()) == extension {
-			if err := os.Remove(filepath.Join(db.dbDir, e.Name())); err != nil {
-				return err
-			}
-		}
 	}
 	db.schemas = make(map[string]SchemaDefinition)
 	db.sessions = make(map[string]struct{})
@@ -107,30 +100,17 @@ func (db *MingleDB) DefineSchema(collection string, schema SchemaDefinition) {
 	db.schemas[collection] = schema
 }
 
-// ListCollections returns the names of all collections (existing .mgdb files and any with schema defined).
+// ListCollections returns the names of all collections in the single DB file and schemas.
 func (db *MingleDB) ListCollections() ([]string, error) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
-	entries, err := os.ReadDir(db.dbDir)
+	records, err := db.readAllRecordsLocked()
 	if err != nil {
-		if os.IsNotExist(err) {
-			names := make([]string, 0, len(db.schemas))
-			for name := range db.schemas {
-				names = append(names, name)
-			}
-			return names, nil
-		}
 		return nil, err
 	}
 	seen := make(map[string]struct{})
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		if filepath.Ext(e.Name()) == extension {
-			name := e.Name()[:len(e.Name())-len(extension)]
-			seen[name] = struct{}{}
-		}
+	for _, r := range records {
+		seen[r.Collection] = struct{}{}
 	}
 	for name := range db.schemas {
 		seen[name] = struct{}{}
@@ -142,9 +122,9 @@ func (db *MingleDB) ListCollections() ([]string, error) {
 	return names, nil
 }
 
-// DBDir returns the current database directory path.
+// DBDir returns the current database file path.
 func (db *MingleDB) DBDir() string {
-	return db.dbDir
+	return db.dbPath
 }
 
 // GetSchema returns the schema for a collection if defined, and whether it exists.
@@ -155,19 +135,14 @@ func (db *MingleDB) GetSchema(collection string) (SchemaDefinition, bool) {
 	return s, ok
 }
 
-func (db *MingleDB) getFilePath(collection string) string {
-	return filepath.Join(db.dbDir, collection+extension)
-}
-
-func (db *MingleDB) initCollectionFile(collection string) error {
-	fpath := db.getFilePath(collection)
-	if _, err := os.Stat(fpath); err == nil {
+func (db *MingleDB) ensureDatabaseFileLocked() error {
+	if _, err := os.Stat(db.dbPath); err == nil {
 		return nil
 	}
-	meta, _ := json.Marshal(map[string]string{"collection": collection})
+	meta, _ := json.Marshal(map[string]string{"scope": "database", "format": "single-file-v2"})
 	var metaLen [4]byte
 	binary.LittleEndian.PutUint32(metaLen[:], uint32(len(meta)))
-	return os.WriteFile(fpath, append(append([]byte(header), metaLen[:]...), meta...), 0644)
+	return os.WriteFile(db.dbPath, append(append([]byte(header), metaLen[:]...), meta...), 0644)
 }
 
 func (db *MingleDB) hashPassword(password string) string {
@@ -180,7 +155,7 @@ func (db *MingleDB) RegisterUser(username, password string) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
-	if err := db.initCollectionFile(authCollection); err != nil {
+	if err := db.ensureDatabaseFileLocked(); err != nil {
 		return err
 	}
 	users, err := db.findAllLocked(authCollection)
@@ -245,7 +220,7 @@ func (db *MingleDB) InsertOne(collection string, doc map[string]interface{}) err
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
-	if err := db.initCollectionFile(collection); err != nil {
+	if err := db.ensureDatabaseFileLocked(); err != nil {
 		return err
 	}
 	if err := db.validateSchemaLocked(collection, doc); err != nil {
@@ -374,16 +349,23 @@ func (db *MingleDB) validateSchemaLocked(collection string, doc map[string]inter
 	return nil
 }
 
+type dbRecord struct {
+	Collection string                 `bson:"collection" json:"collection"`
+	Doc        map[string]interface{} `bson:"doc" json:"doc"`
+}
+
 func (db *MingleDB) insertOneLocked(collection string, doc map[string]interface{}) error {
-	bsonBytes, err := marshalBSON(doc)
+	bsonBytes, err := marshalBSON(map[string]interface{}{
+		"collection": collection,
+		"doc":        doc,
+	})
 	if err != nil {
 		return err
 	}
 	compressed := compress(bsonBytes)
 	var lenBuf [4]byte
 	binary.LittleEndian.PutUint32(lenBuf[:], uint32(len(compressed)))
-	fpath := db.getFilePath(collection)
-	f, err := os.OpenFile(fpath, os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(db.dbPath, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
@@ -393,8 +375,38 @@ func (db *MingleDB) insertOneLocked(collection string, doc map[string]interface{
 }
 
 func (db *MingleDB) findAllLocked(collection string) ([]map[string]interface{}, error) {
-	fpath := db.getFilePath(collection)
-	data, err := os.ReadFile(fpath)
+	records, err := db.readAllRecordsLocked()
+	if err != nil {
+		return nil, err
+	}
+	var docs []map[string]interface{}
+	for _, r := range records {
+		if r.Collection == collection {
+			docs = append(docs, r.Doc)
+		}
+	}
+	return docs, nil
+}
+
+func (db *MingleDB) rewriteCollectionLocked(collection string, docs []map[string]interface{}) error {
+	records, err := db.readAllRecordsLocked()
+	if err != nil {
+		return err
+	}
+	out := make([]dbRecord, 0, len(records))
+	for _, r := range records {
+		if r.Collection != collection {
+			out = append(out, r)
+		}
+	}
+	for _, d := range docs {
+		out = append(out, dbRecord{Collection: collection, Doc: d})
+	}
+	return db.writeAllRecordsLocked(out)
+}
+
+func (db *MingleDB) readAllRecordsLocked() ([]dbRecord, error) {
+	data, err := os.ReadFile(db.dbPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -408,17 +420,26 @@ func (db *MingleDB) findAllLocked(collection string) ([]map[string]interface{}, 
 		return nil, errors.New("invalid mingleDB file header")
 	}
 	offset := len(header)
-	metaLen := binary.LittleEndian.Uint32(data[offset : offset+4])
-	offset += 4 + int(metaLen)
-	var docs []map[string]interface{}
+	metaLen := int(binary.LittleEndian.Uint32(data[offset : offset+4]))
+	offset += 4
+	if offset+metaLen > len(data) {
+		return nil, nil
+	}
+	metaBytes := data[offset : offset+metaLen]
+	offset += metaLen
+	meta := map[string]interface{}{}
+	_ = json.Unmarshal(metaBytes, &meta)
+	legacyCollection, _ := meta["collection"].(string)
+
+	var records []dbRecord
 	for offset+4 <= len(data) {
-		docLen := binary.LittleEndian.Uint32(data[offset : offset+4])
+		docLen := int(binary.LittleEndian.Uint32(data[offset : offset+4]))
 		offset += 4
-		if offset+int(docLen) > len(data) {
+		if offset+docLen > len(data) {
 			break
 		}
-		compressed := data[offset : offset+int(docLen)]
-		offset += int(docLen)
+		compressed := data[offset : offset+docLen]
+		offset += docLen
 		bsonBytes, err := decompress(compressed)
 		if err != nil {
 			return nil, err
@@ -427,18 +448,30 @@ func (db *MingleDB) findAllLocked(collection string) ([]map[string]interface{}, 
 		if err != nil {
 			return nil, err
 		}
-		docs = append(docs, doc)
+
+		if c, ok := doc["collection"].(string); ok {
+			if payload, ok := toStringMap(doc["doc"]); ok {
+				records = append(records, dbRecord{Collection: c, Doc: payload})
+				continue
+			}
+		}
+		if legacyCollection != "" {
+			records = append(records, dbRecord{Collection: legacyCollection, Doc: doc})
+		}
 	}
-	return docs, nil
+	return records, nil
 }
 
-func (db *MingleDB) rewriteCollectionLocked(collection string, docs []map[string]interface{}) error {
-	meta, _ := json.Marshal(map[string]string{"collection": collection})
+func (db *MingleDB) writeAllRecordsLocked(records []dbRecord) error {
+	meta, _ := json.Marshal(map[string]string{"scope": "database", "format": "single-file-v2"})
 	var metaLen [4]byte
 	binary.LittleEndian.PutUint32(metaLen[:], uint32(len(meta)))
 	var body []byte
-	for _, doc := range docs {
-		bsonBytes, err := marshalBSON(doc)
+	for _, r := range records {
+		bsonBytes, err := marshalBSON(map[string]interface{}{
+			"collection": r.Collection,
+			"doc":        r.Doc,
+		})
 		if err != nil {
 			return err
 		}
@@ -447,7 +480,7 @@ func (db *MingleDB) rewriteCollectionLocked(collection string, docs []map[string
 		binary.LittleEndian.PutUint32(lenBuf[:], uint32(len(compressed)))
 		body = append(body, append(lenBuf[:], compressed...)...)
 	}
-	return os.WriteFile(db.getFilePath(collection), append(append([]byte(header), metaLen[:]...), append(meta, body...)...), 0644)
+	return os.WriteFile(db.dbPath, append(append([]byte(header), metaLen[:]...), append(meta, body...)...), 0644)
 }
 
 func compress(data []byte) []byte {
@@ -477,6 +510,17 @@ func unmarshalBSON(data []byte) (map[string]interface{}, error) {
 		return nil, err
 	}
 	return map[string]interface{}(out), nil
+}
+
+func toStringMap(v interface{}) (map[string]interface{}, bool) {
+	switch m := v.(type) {
+	case map[string]interface{}:
+		return m, true
+	case bson.M:
+		return map[string]interface{}(m), true
+	default:
+		return nil, false
+	}
 }
 
 // matchQuery returns true if doc matches the filter. Supports $gt, $gte, $lt, $lte, $eq, $ne, $in, $nin, and $regex.
