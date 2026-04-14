@@ -1,6 +1,6 @@
 # gomingleDB
 
-Go port of [MingleDB](https://github.com/marcuwynu23/mingledb): a lightweight, file-based NoSQL database with BSON serialization, zlib compression, schema validation, and basic authentication.
+Go port of [MingleDB](https://github.com/mingledb/mingledb): a lightweight, file-based NoSQL database with BSON serialization, zlib compression, schema validation, and basic authentication.
 
 ## Features
 
@@ -15,7 +15,7 @@ Go port of [MingleDB](https://github.com/marcuwynu23/mingledb): a lightweight, f
 ## Installation
 
 ```bash
-go get gomingleDB
+go get github.com/mingledb/gomingleDB
 ```
 
 ## Usage
@@ -23,7 +23,7 @@ go get gomingleDB
 ```go
 package main
 
-import "gomingleDB"
+import "github.com/mingledb/gomingleDB"
 
 func main() {
     db := gomingleDB.New("./data") // optional: default is "./mydb"
@@ -98,7 +98,7 @@ docs, _ := db.Find("users", map[string]interface{}{"name": re})
 
 ## File format
 
-Same as [mingleDB](https://github.com/marcuwynu23/mingledb): header `MINGLEDBv1`, 4-byte meta length, JSON metadata, then for each document: 4-byte length + zlib-compressed BSON. Collections use the `.mgdb` extension.
+Same as [mingleDB](https://github.com/mingledb/mingledb): header `MINGLEDBv1`, 4-byte meta length, JSON metadata, then for each document: 4-byte length + zlib-compressed BSON. Collections use the `.mgdb` extension.
 
 ## Tests
 
