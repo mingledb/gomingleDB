@@ -10,7 +10,7 @@ Go port of [MingleDB](https://github.com/mingledb/mingledb): a lightweight, file
 | **Schema definition** | Required fields, types (`string`, `number`), unique constraints |
 | **Query operators** | `$gt`, `$gte`, `$lt`, `$lte`, `$eq`, `$ne`, `$in`, `$nin`, `$regex` |
 | **Compression** | BSON + zlib for compact storage |
-| **Flat file storage** | One `.mgdb` file per collection; same format as mingleDB |
+| **Flat file storage** | One `.mgdb` database file containing all collections |
 
 ## Installation
 
@@ -26,7 +26,8 @@ package main
 import "github.com/mingledb/gomingleDB"
 
 func main() {
-    db := gomingleDB.New("./data") // optional: default is "./mydb"
+    db := gomingleDB.New("./data") // directory -> ./data/database.mgdb
+    // db := gomingleDB.New("./data/app.mgdb") // explicit single-file path
 
     // 1. Register & login
     _ = db.RegisterUser("admin", "secure123")
@@ -82,8 +83,8 @@ docs, _ := db.Find("users", map[string]interface{}{"name": re})
 
 ## API
 
-- `New(dbDir string) *MingleDB`
-- `Reset() error` — wipe all collections and schemas
+- `New(dbPath string) *MingleDB` — accepts directory or `.mgdb` file path
+- `Reset() error` — wipe database file and schemas
 - `DefineSchema(collection string, schema SchemaDefinition)`
 - `RegisterUser(username, password string) error`
 - `Login(username, password string) error`
@@ -98,7 +99,7 @@ docs, _ := db.Find("users", map[string]interface{}{"name": re})
 
 ## File format
 
-Same as [mingleDB](https://github.com/mingledb/mingledb): header `MINGLEDBv1`, 4-byte meta length, JSON metadata, then for each document: 4-byte length + zlib-compressed BSON. Collections use the `.mgdb` extension.
+Data is stored in a single `.mgdb` database file that contains all collections. Internal storage layout details are intentionally abstracted from user-facing docs.
 
 ## Tests
 
